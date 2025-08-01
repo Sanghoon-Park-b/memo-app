@@ -1,70 +1,140 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { v4 as uuidv4 } from 'uuid'
 import { Memo, MemoFormData } from '@/types/memo'
-import { localStorageUtils } from '@/utils/localStorage'
-import { seedSampleData } from '@/utils/seedData'
+import { createClient } from '@/utils/supabase/client'
+import { Database } from '@/types/database'
 
 export const useMemos = () => {
   const [memos, setMemos] = useState<Memo[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('all')
+  const supabase = createClient()
 
   // 메모 로드
   useEffect(() => {
-    setLoading(true)
-    try {
-      // 샘플 데이터 시딩 (기존 데이터가 없을 때만)
-      seedSampleData()
-      const loadedMemos = localStorageUtils.getMemos()
-      setMemos(loadedMemos)
-    } catch (error) {
-      console.error('Failed to load memos:', error)
-    } finally {
-      setLoading(false)
+    const loadMemos = async () => {
+      setLoading(true)
+      try {
+        const { data, error } = await supabase
+          .from('memos')
+          .select('*')
+          .order('created_at', { ascending: false })
+        
+        if (error) {
+          console.error('Error loading memos:', error)
+          setMemos([])
+        } else {
+          // Supabase의 created_at과 updated_at을 문자열로 변환
+          const formattedMemos: Memo[] = data.map(memo => ({
+            ...memo,
+            createdAt: memo.created_at,
+            updatedAt: memo.updated_at
+          }))
+          setMemos(formattedMemos)
+        }
+      } catch (error) {
+        console.error('Failed to load memos:', error)
+        setMemos([])
+      } finally {
+        setLoading(false)
+      }
     }
-  }, [])
+
+    loadMemos()
+  }, [supabase])
 
   // 메모 생성
-  const createMemo = useCallback((formData: MemoFormData): Memo => {
-    const newMemo: Memo = {
-      id: uuidv4(),
-      ...formData,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+  const createMemo = useCallback(async (formData: MemoFormData): Promise<Memo | null> => {
+    try {
+      const { data, error } = await supabase
+        .from('memos')
+        .insert({
+          title: formData.title,
+          content: formData.content,
+          category: formData.category,
+          tags: formData.tags
+        })
+        .select()
+        .single()
+
+      if (error) {
+        console.error('Error creating memo:', error)
+        return null
+      }
+
+      const newMemo: Memo = {
+        ...data,
+        createdAt: data.created_at,
+        updatedAt: data.updated_at
+      }
+
+      setMemos(prev => [newMemo, ...prev])
+      return newMemo
+    } catch (error) {
+      console.error('Failed to create memo:', error)
+      return null
     }
-
-    localStorageUtils.addMemo(newMemo)
-    setMemos(prev => [newMemo, ...prev])
-
-    return newMemo
-  }, [])
+  }, [supabase])
 
   // 메모 업데이트
   const updateMemo = useCallback(
-    (id: string, formData: MemoFormData): void => {
-      const existingMemo = memos.find(memo => memo.id === id)
-      if (!existingMemo) return
+    async (id: string, formData: MemoFormData): Promise<boolean> => {
+      try {
+        const { data, error } = await supabase
+          .from('memos')
+          .update({
+            title: formData.title,
+            content: formData.content,
+            category: formData.category,
+            tags: formData.tags
+          })
+          .eq('id', id)
+          .select()
+          .single()
 
-      const updatedMemo: Memo = {
-        ...existingMemo,
-        ...formData,
-        updatedAt: new Date().toISOString(),
+        if (error) {
+          console.error('Error updating memo:', error)
+          return false
+        }
+
+        const updatedMemo: Memo = {
+          ...data,
+          createdAt: data.created_at,
+          updatedAt: data.updated_at
+        }
+
+        setMemos(prev => prev.map(memo => (memo.id === id ? updatedMemo : memo)))
+        return true
+      } catch (error) {
+        console.error('Failed to update memo:', error)
+        return false
       }
-
-      localStorageUtils.updateMemo(updatedMemo)
-      setMemos(prev => prev.map(memo => (memo.id === id ? updatedMemo : memo)))
     },
-    [memos]
+    [supabase]
   )
 
   // 메모 삭제
-  const deleteMemo = useCallback((id: string): void => {
-    localStorageUtils.deleteMemo(id)
-    setMemos(prev => prev.filter(memo => memo.id !== id))
-  }, [])
+  const deleteMemo = useCallback(async (id: string): Promise<boolean> => {
+    try {
+      const { error } = await supabase
+        .from('memos')
+        .delete()
+        .eq('id', id)
+
+      if (error) {
+        console.error('Error deleting memo:', error)
+        return false
+      }
+
+      setMemos(prev => prev.filter(memo => memo.id !== id))
+      return true
+    } catch (error) {
+      console.error('Failed to delete memo:', error)
+      return false
+    }
+  }, [supabase])
 
   // 메모 검색
   const searchMemos = useCallback((query: string): void => {
@@ -108,12 +178,27 @@ export const useMemos = () => {
   }, [memos, selectedCategory, searchQuery])
 
   // 모든 메모 삭제
-  const clearAllMemos = useCallback((): void => {
-    localStorageUtils.clearMemos()
-    setMemos([])
-    setSearchQuery('')
-    setSelectedCategory('all')
-  }, [])
+  const clearAllMemos = useCallback(async (): Promise<boolean> => {
+    try {
+      const { error } = await supabase
+        .from('memos')
+        .delete()
+        .neq('id', '') // 모든 레코드 삭제
+
+      if (error) {
+        console.error('Error clearing all memos:', error)
+        return false
+      }
+
+      setMemos([])
+      setSearchQuery('')
+      setSelectedCategory('all')
+      return true
+    } catch (error) {
+      console.error('Failed to clear all memos:', error)
+      return false
+    }
+  }, [supabase])
 
   // 통계 정보
   const stats = useMemo(() => {
