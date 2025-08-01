@@ -3,19 +3,38 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Memo, MemoFormData } from '@/types/memo'
 import { createClient } from '@/utils/supabase/client'
-import { Database } from '@/types/database'
 
 export const useMemos = () => {
   const [memos, setMemos] = useState<Memo[]>([])
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('all')
-  const supabase = createClient()
+  
+  // Safely create Supabase client
+  const supabase = useMemo(() => {
+    try {
+      // Check if environment variables are available
+      const hasSupabaseConfig = process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+      return hasSupabaseConfig ? createClient() : null
+    } catch (error) {
+      console.warn('Failed to create Supabase client:', error)
+      return null
+    }
+  }, [])
 
   // 메모 로드
   useEffect(() => {
     const loadMemos = async () => {
       setLoading(true)
+      
+      // Supabase 설정이 없으면 빈 배열로 설정하고 로딩 완료
+      if (!supabase) {
+        console.warn('Supabase configuration missing. Running in offline mode.')
+        setMemos([])
+        setLoading(false)
+        return
+      }
+      
       try {
         const { data, error } = await supabase
           .from('memos')
@@ -47,6 +66,11 @@ export const useMemos = () => {
 
   // 메모 생성
   const createMemo = useCallback(async (formData: MemoFormData): Promise<Memo | null> => {
+    if (!supabase) {
+      console.warn('Cannot create memo: Supabase not configured')
+      return null
+    }
+    
     try {
       const { data, error } = await supabase
         .from('memos')
@@ -81,6 +105,11 @@ export const useMemos = () => {
   // 메모 업데이트
   const updateMemo = useCallback(
     async (id: string, formData: MemoFormData): Promise<boolean> => {
+      if (!supabase) {
+        console.warn('Cannot update memo: Supabase not configured')
+        return false
+      }
+      
       try {
         const { data, error } = await supabase
           .from('memos')
@@ -117,6 +146,11 @@ export const useMemos = () => {
 
   // 메모 삭제
   const deleteMemo = useCallback(async (id: string): Promise<boolean> => {
+    if (!supabase) {
+      console.warn('Cannot delete memo: Supabase not configured')
+      return false
+    }
+    
     try {
       const { error } = await supabase
         .from('memos')
@@ -179,6 +213,11 @@ export const useMemos = () => {
 
   // 모든 메모 삭제
   const clearAllMemos = useCallback(async (): Promise<boolean> => {
+    if (!supabase) {
+      console.warn('Cannot clear memos: Supabase not configured')
+      return false
+    }
+    
     try {
       const { error } = await supabase
         .from('memos')

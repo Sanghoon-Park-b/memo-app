@@ -1,6 +1,10 @@
 'use client'
 
 import { useState } from 'react'
+
+// Force dynamic rendering to prevent build-time prerendering issues
+export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 import { useMemos } from '@/hooks/useMemos'
 import { Memo, MemoFormData } from '@/types/memo'
 import MemoList from '@/components/MemoList'
